@@ -240,7 +240,9 @@
         if (game.contains(circle)) circle.remove();
       }, 3000);
     }
-
+socket.on("searching", () => {
+  status.textContent = "🔍 Searching for opponent...";
+});
     socket.on("startGame", (data) => {
       room = data.room;
       status.textContent = "Opponent found! Game started.";
