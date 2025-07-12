@@ -16,30 +16,32 @@ app.get('/', (req, res) => {
 });
 
 let waitingPlayer = null;
-let gameRooms = {};
+let waitingTimeout = null;
 
 io.on('connection', socket => {
-  console.log('New client connected:', socket.id);
+  console.log('Client connected:', socket.id);
+  socket.emit('searching');
 
   if (waitingPlayer === null) {
     waitingPlayer = socket;
-    socket.emit('status', 'Waiting for an opponent...');
-  } else {
-    const roomID = \`\${waitingPlayer.id}#\${socket.id}\`;
-    gameRooms[roomID] = {
-      players: [waitingPlayer, socket],
-      scores: {
-        [waitingPlayer.id]: 0,
-        [socket.id]: 0
-      }
-    };
 
+    waitingTimeout = setTimeout(() => {
+      if (waitingPlayer === socket) {
+        const roomID = `ai_room_${socket.id}`;
+        socket.join(roomID);
+        socket.emit('startGame', { room: roomID, ai: true });
+        startAIActions(roomID, socket);
+        waitingPlayer = null;
+      }
+    }, 5000);
+
+  } else {
+    clearTimeout(waitingTimeout);
+    const roomID = `${waitingPlayer.id}${socket.id}`;
     waitingPlayer.join(roomID);
     socket.join(roomID);
-
     waitingPlayer.emit('startGame', { room: roomID });
     socket.emit('startGame', { room: roomID });
-
     waitingPlayer = null;
   }
 
@@ -48,11 +50,7 @@ io.on('connection', socket => {
   });
 
   socket.on('scoreUpdate', ({ room, score }) => {
-    const players = gameRooms[room]?.players;
-    if (players) {
-      gameRooms[room].scores[socket.id] = score;
-      socket.to(room).emit('opponentScore', score);
-    }
+    socket.to(room).emit('opponentScore', score);
   });
 
   socket.on('chat', ({ room, message }) => {
@@ -64,27 +62,30 @@ io.on('connection', socket => {
   });
 
   socket.on('disconnect', () => {
-    console.log('Client disconnected:', socket.id);
-
+    console.log('Disconnected:', socket.id);
     if (waitingPlayer && waitingPlayer.id === socket.id) {
+      clearTimeout(waitingTimeout);
       waitingPlayer = null;
     }
-
-    for (const room in gameRooms) {
-      const players = gameRooms[room].players;
-      if (players.some(p => p.id === socket.id)) {
-        players.forEach(p => {
-          if (p.id !== socket.id) {
-            p.emit('opponentDisconnected');
-          }
-        });
-        delete gameRooms[room];
-        break;
-      }
-    }
+    io.emit('opponentDisconnected');
   });
 });
 
+function startAIActions(room, playerSocket) {
+  let aiScore = 0;
+  const aiInterval = setInterval(() => {
+    if (!playerSocket.connected) {
+      clearInterval(aiInterval);
+      return;
+    }
+    const x = Math.random() * 700;
+    playerSocket.emit('opponentClicked', { x });
+    aiScore++;
+    playerSocket.emit('opponentScore', aiScore);
+    if (aiScore >= 100) clearInterval(aiInterval);
+  }, 1800);
+}
+
 server.listen(PORT, () => {
-  console.log(\`Server running on http://localhost:\${PORT}\`);
+  console.log(`Server with opponent search running at http://localhost:${PORT}`);
 });
